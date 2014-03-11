@@ -12,6 +12,7 @@ import thBase.math;
 import thBase.math3d.all;
 import thBase.math3d.mats;
 import thBase.math3d.vecs;
+import thBase.casts;
 import thBase.asserthandler;
 import assimp.assimp;
 import modeltypes;
@@ -101,16 +102,16 @@ void ProgressModel(string path)
 {
   try
   {
-		const(aiScene)* scene = Assimp.ImportFile(toCString(path), 
+    const(aiScene)* scene = Assimp.ImportFile(toCString(path), 
                                               aiPostProcessSteps.CalcTangentSpace |
                                               aiPostProcessSteps.Triangulate |
                                               aiPostProcessSteps.JoinIdenticalVertices |
                                               aiPostProcessSteps.FlipUVs);// |
     //aiPostProcessSteps.MakeLeftHanded); // |
     //aiPostProcessSteps.PreTransformVertices );
-		if(scene is null){
-			Error("Couldn't load model from file '%s'", path);
-		}
+    if(scene is null){
+      Error("Couldn't load model from file '%s'", path);
+    }
 
     scope(exit)
     {
@@ -211,6 +212,24 @@ void ProgressModel(string path)
         materialNameMemory += materialName.length;
       }
       outFile.write(materialNameMemory);
+
+      // calc bone name memory
+      uint boneNameMemory = 0;
+      uint numBones = 0;
+      uint numBoneInfos = 0;
+      for(size_t i=0; i<scene.mNumMeshes; i++)
+      {
+        const(aiMesh*) aimesh = scene.mMeshes[i];
+        for(size_t j = 0; j < aimesh.mNumBones; j++)
+        {
+          boneNameMemory += aimesh.mBones[j].mName.length;
+        }
+        numBones += aimesh.mNumBones;
+        numBoneInfos += aimesh.mNumVertices;
+      }
+      outFile.write(boneNameMemory);
+      outFile.write(numBones);
+      outFile.write(numBoneInfos);
 
       outFile.write(scene.mNumMaterials);
       outFile.write(scene.mNumMeshes);
@@ -463,6 +482,57 @@ void ProgressModel(string path)
               }
             }
           }
+        }
+
+        struct BoneInfo
+        {
+          ushort[4] boneIndices = [0, 0, 0, 0];
+          float[4] boneWeights = [0, 0, 0, 0];
+        }
+
+        static assert(BoneInfo.sizeof == ushort.sizeof*4 + float.sizeof*4);
+
+        // Bones
+        {
+          outFile.startWriteChunk("bones");
+          scope(exit) 
+          {
+            size_t size = outFile.endWriteChunk();
+            writefln("bones %d kb", size / 1024);
+          }
+
+          outFile.write(int_cast!uint(aimesh.mNumBones));
+          foreach(bone; aimesh.mBones[0..aimesh.mNumBones])
+          {
+            outFile.writeArray(bone.mName.data[0..bone.mName.length]);
+            outFile.write(Convert(bone.mOffsetMatrix));
+          }
+
+          //Inversing bone-vertex relations
+          // bones -> vertices ==> vertices -> bones
+
+          auto bones = NewArray!BoneInfo(aimesh.mNumVertices);
+          scope(exit) Delete(bones);
+
+          auto numBones = NewArray!ubyte(aimesh.mNumVertices);
+          scope(exit) Delete(numBones);
+          foreach(ushort j, bone; aimesh.mBones[0..aimesh.mNumBones])
+          {
+            foreach(weight; bone.mWeights[0..bone.mNumWeights])
+            {
+              auto index = numBones[weight.mVertexId];
+              if(index >= 4)
+              {
+                Error("Vertices that are influenced by more than 4 bones are NOT supported!");
+              }
+
+              numBones[weight.mVertexId]++;
+
+              bones[weight.mVertexId].boneWeights[index] = weight.mWeight;
+              bones[weight.mVertexId].boneIndices[index] = j;
+            }
+          }
+          outFile.writeArray(bones);
         }
 
         //Faces

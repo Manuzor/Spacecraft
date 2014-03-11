@@ -22,7 +22,8 @@ enum TextureType : ubyte {
 enum ModelFormatVersion : uint
 {
   Version1 = 1, //Initial version
-  Version2 = 2  //saving material names
+  Version2 = 2, //saving material names
+  Version3 = 3  // Bones, baby!
 }
 
 enum PerVertexData : uint
