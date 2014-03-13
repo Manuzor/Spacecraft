@@ -634,6 +634,11 @@ void ProgressModel(string path)
 
 int main(string[] args)
 {
+  // Pause before exiting by default. Gets set later to false, if --nopause is supplied.
+  bool pauseBeforeExiting = true;
+
+  scope(exit){ if(pauseBeforeExiting) system("pause"); }
+
   thBase.asserthandler.Init();
   Assimp.Load("assimp.dll","");
   auto models = scopedRef!(Stack!string)(NoArgs());
@@ -658,6 +663,10 @@ int main(string[] args)
     {
       g_includeMissingTextures = true;
     }
+    else if(args[i] == "--nopause")
+    {
+      pauseBeforeExiting = false;
+    }
     else if(args[i].endsWith(".dae", CaseSensitive.no))
     {
       if(thBase.file.exists(args[i]))
@@ -670,8 +679,10 @@ int main(string[] args)
     else
     {
       writefln("Error: Unkown command line option %s", args[i]);
+      return 2;
     }
   }
+
   if(models.size == 0)
   {
     writefln("No model specified");
@@ -690,8 +701,6 @@ int main(string[] args)
     Delete(ex);
     return -1;
   }
-
-  system("pause");
 
   return 0;
 }
