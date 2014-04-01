@@ -97,6 +97,36 @@ mat4 Convert(ref const(aiMatrix4x4) pData){
   return result;
 }
 
+class BoneNode
+{
+  // For generating unique IDs
+  static ushort counter = 1;
+
+public:
+
+  // Hierarchy stuff
+  BoneNode* parent;
+  Vector!(BoneNode*) children;
+
+  // Actual bone data
+  ushort id;
+  const(char)[] name;
+  mat4 offsetMatrix;
+  
+  this(const(aiBone)* bone)
+  {
+    id = counter++;
+    parent = null;
+    children = New!(Vector!(BoneNode*))();
+    name = bone.mName.data[0..bone.mName.length];
+    offsetMatrix = Convert(bone.mOffsetMatrix);
+  }
+
+  ~this()
+  {
+    Delete(children);
+  }
+}
 
 void ProgressModel(string path)
 {
@@ -192,6 +222,72 @@ void ProgressModel(string path)
           }
         }
       }
+    }
+
+    auto uniqueBones = composite!( Hashmap!(const(char)[], ref BoneNode, StringHashPolicy) )(defaultCtor);
+    scope(exit){
+      foreach(bone; uniqueBones.keys)
+      {
+        Delete(bone);
+      }
+    }
+    // Collect unique bones
+    {
+      // Collect all unique bones from all meshes
+      for(size_t i=0; i < scene.mNumMeshes; i++)
+      {
+        const(aiMesh*) aimesh = scene.mMeshes[i];
+        for(size_t j = 0; j < aimesh.mNumBones; j++)
+        {
+          auto bone = aimesh.mBones[j];
+          auto key = bone.mName.data[0..bone.mName.length];
+          if(!uniqueBones.exists(key))
+          {
+            // TODO: Create BoneNode POINTERS and add them to the hashmap
+            auto tmp = New!(BoneNode)(bone);
+            uniqueBones[key] = tmp;
+          }
+        }
+      }
+    }
+
+    // Build bone hierarchy
+    {
+      // Define helper functions
+      void findBoneRoots(const(aiNode)* sceneNode, out Vector!(const(aiNode)*) boneRoots)
+      {
+        auto nodeName = sceneNode.mName.data[0..sceneNode.mName.length];
+        if(uniqueBones.exists(nodeName))
+        {
+          boneRoots.push_back(sceneNode);
+          return;
+        }
+        foreach(childNode; sceneNode.mChildren[0..sceneNode.mNumChildren])
+        {
+          findBoneRoots(childNode, boneRoots);
+        }
+      }
+      void buildHierarchy(const(aiNode)* sceneNode, BoneNode* parent)
+      {
+        foreach(childNode; sceneNode.mChildren[0..sceneNode.mNumChildren])
+        {
+          auto boneName = childNode.mName.data[0..childNode.mName.length];
+          auto bone = uniqueBones[boneName];
+          parent.children.push_back(bone);
+          buildHierarchy(childNode, bone);
+        }
+      }
+
+      // Begin the actual processing
+      auto boneRoots = composite!(Vector!(const(aiNode)*))(defaultCtor);
+      findBoneRoots(scene.mRootNode, boneRoots);
+
+      foreach(boneRoot ; boneRoots)
+      {
+        auto boneName = boneRoot.mName.data[0..boneRoot.mName.length];
+        buildHierarchy(boneRoot, uniqueBones[boneName]);
+      }
+      
     }
 
     //Size information
@@ -310,7 +406,6 @@ void ProgressModel(string path)
         outFile.writeArray(filename);
       }
     }
-
 
     //Materials
     {
@@ -486,7 +581,7 @@ void ProgressModel(string path)
 
         struct BoneInfo
         {
-          ushort[4] boneIndices = [0, 0, 0, 0];
+          ushort[4] boneIds = [0, 0, 0, 0];
           float[4] boneWeights = [0, 0, 0, 0];
         }
 
@@ -529,7 +624,7 @@ void ProgressModel(string path)
               numBones[weight.mVertexId]++;
 
               bones[weight.mVertexId].boneWeights[index] = weight.mWeight;
-              bones[weight.mVertexId].boneIndices[index] = j;
+              bones[weight.mVertexId].boneIds[index] = uniqueBones[bone.mName.data[0..bone.mName.length]].id;
             }
           }
           outFile.writeArray(bones);
