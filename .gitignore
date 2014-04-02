@@ -18,3 +18,5 @@
 *.map
 *.json
 *.rsp
+tools/ModelConverter/Debug/*
+tools/ModelConverter/bin/*
