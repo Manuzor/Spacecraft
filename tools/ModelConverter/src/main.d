@@ -97,7 +97,7 @@ mat4 Convert(ref const(aiMatrix4x4) pData){
   return result;
 }
 
-class BoneNode
+struct BoneNode
 {
   // For generating unique IDs
   static ushort counter = 1;
@@ -224,9 +224,9 @@ void ProgressModel(string path)
       }
     }
 
-    auto uniqueBones = composite!( Hashmap!(const(char)[], ref BoneNode, StringHashPolicy) )(defaultCtor);
+    auto uniqueBones = composite!( Hashmap!(const(char)[], BoneNode*, StringHashPolicy) )(defaultCtor);
     scope(exit){
-      foreach(bone; uniqueBones.keys)
+      foreach(bone; uniqueBones.values)
       {
         Delete(bone);
       }
@@ -243,9 +243,7 @@ void ProgressModel(string path)
           auto key = bone.mName.data[0..bone.mName.length];
           if(!uniqueBones.exists(key))
           {
-            // TODO: Create BoneNode POINTERS and add them to the hashmap
-            auto tmp = New!(BoneNode)(bone);
-            uniqueBones[key] = tmp;
+            uniqueBones[key] = New!(BoneNode)(bone);
           }
         }
       }
@@ -254,7 +252,7 @@ void ProgressModel(string path)
     // Build bone hierarchy
     {
       // Define helper functions
-      void findBoneRoots(const(aiNode)* sceneNode, out Vector!(const(aiNode)*) boneRoots)
+      void findBoneRoots(const(aiNode)* sceneNode, Vector!(const(aiNode)*) boneRoots)
       {
         auto nodeName = sceneNode.mName.data[0..sceneNode.mName.length];
         if(uniqueBones.exists(nodeName))
@@ -273,6 +271,7 @@ void ProgressModel(string path)
         {
           auto boneName = childNode.mName.data[0..childNode.mName.length];
           auto bone = uniqueBones[boneName];
+          bone.parent = parent;
           parent.children.push_back(bone);
           buildHierarchy(childNode, bone);
         }
@@ -309,23 +308,30 @@ void ProgressModel(string path)
       }
       outFile.write(materialNameMemory);
 
-      // calc bone name memory
-      uint boneNameMemory = 0;
-      uint numBones = 0;
-      uint numBoneInfos = 0;
-      for(size_t i=0; i<scene.mNumMeshes; i++)
+      // calc boneNode memory
       {
-        const(aiMesh*) aimesh = scene.mMeshes[i];
-        for(size_t j = 0; j < aimesh.mNumBones; j++)
+        uint boneNameMemory = 0;
+        uint numChildren = 0;
+        foreach(bone; uniqueBones)
         {
-          boneNameMemory += aimesh.mBones[j].mName.length;
+          boneNameMemory += bone.name.length;
+          numChildren += bone.children.length;
         }
-        numBones += aimesh.mNumBones;
-        numBoneInfos += aimesh.mNumVertices;
+        outFile.write(boneNameMemory);
+        outFile.write(int_cast!uint(uniqueBones.count));
+        outFile.write(numChildren);
       }
-      outFile.write(boneNameMemory);
-      outFile.write(numBones);
-      outFile.write(numBoneInfos);
+
+      // calc bone memory of meshes
+      {
+        uint numBoneInfos = 0;
+        for(size_t i=0; i<scene.mNumMeshes; i++)
+        {
+          const(aiMesh*) aimesh = scene.mMeshes[i];
+          numBoneInfos += aimesh.mNumVertices;
+        }
+        outFile.write(numBoneInfos);
+      }
 
       outFile.write(scene.mNumMaterials);
       outFile.write(scene.mNumMeshes);
@@ -396,7 +402,7 @@ void ProgressModel(string path)
       outFile.startWriteChunk("textures");
       scope(exit){
         size_t size = outFile.endWriteChunk();
-        writefln("textures %d kb", size/1024);
+        writefln("textures %d kb (%d bytes)", size/1024, size);
       }
 
       //Write the collected results to the chunkfile
@@ -449,6 +455,34 @@ void ProgressModel(string path)
           {
             outFile.write(info.id);
             outFile.write(info.semantic);
+          }
+        }
+      }
+    }
+
+    // Bone hierarchy
+    {
+      outFile.startWriteChunk("bones");
+      scope(exit){
+        size_t size = outFile.endWriteChunk();
+        writefln("bones (hierarchy) %d kb (%d bytes)", size/1024, size);
+      }
+
+      outFile.write(uniqueBones.count);
+      for(size_t i = 0; i < uniqueBones.count; ++i)
+      {
+        foreach(bone; uniqueBones)
+        {
+          if(bone.id == i + 1) // id of 0 is an invalid id
+          {
+            outFile.writeArray(bone.name);
+            outFile.write(bone.offsetMatrix);
+            outFile.write(int_cast!ushort(bone.parent is null ? 0 : bone.parent.id));
+            outFile.write(int_cast!uint(bone.children.length));
+            foreach(child; bone.children)
+            {
+              outFile.write(child.id);
+            }
           }
         }
       }
@@ -593,21 +627,14 @@ void ProgressModel(string path)
           scope(exit) 
           {
             size_t size = outFile.endWriteChunk();
-            writefln("bones %d kb", size / 1024);
-          }
-
-          outFile.write(int_cast!uint(aimesh.mNumBones));
-          foreach(bone; aimesh.mBones[0..aimesh.mNumBones])
-          {
-            outFile.writeArray(bone.mName.data[0..bone.mName.length]);
-            outFile.write(Convert(bone.mOffsetMatrix));
+            writefln("boneInfos %d kb", size / 1024);
           }
 
           //Inversing bone-vertex relations
-          // bones -> vertices ==> vertices -> bones
+          // boneInfos -> vertices ==> vertices -> boneInfos
 
-          auto bones = NewArray!BoneInfo(aimesh.mNumVertices);
-          scope(exit) Delete(bones);
+          auto boneInfos = NewArray!BoneInfo(aimesh.mNumVertices);
+          scope(exit) Delete(boneInfos);
 
           auto numBones = NewArray!ubyte(aimesh.mNumVertices);
           scope(exit) Delete(numBones);
@@ -615,19 +642,21 @@ void ProgressModel(string path)
           {
             foreach(weight; bone.mWeights[0..bone.mNumWeights])
             {
-              auto index = numBones[weight.mVertexId];
-              if(index >= 4)
+              auto numBonesOnVertex = numBones[weight.mVertexId];
+              if(numBonesOnVertex > 4)
               {
                 Error("Vertices that are influenced by more than 4 bones are NOT supported!");
               }
 
-              numBones[weight.mVertexId]++;
+              numBonesOnVertex++;
+              numBones[weight.mVertexId] = numBonesOnVertex;
+              auto boneIndexOnVertex = numBonesOnVertex - 1;
 
-              bones[weight.mVertexId].boneWeights[index] = weight.mWeight;
-              bones[weight.mVertexId].boneIds[index] = uniqueBones[bone.mName.data[0..bone.mName.length]].id;
+              boneInfos[weight.mVertexId].boneWeights[boneIndexOnVertex] = weight.mWeight;
+              boneInfos[weight.mVertexId].boneIds[boneIndexOnVertex] = uniqueBones[bone.mName.data[0..bone.mName.length]].id;
             }
           }
-          outFile.writeArray(bones);
+          outFile.writeArray(boneInfos);
         }
 
         //Faces

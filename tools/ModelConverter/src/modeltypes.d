@@ -24,7 +24,6 @@ enum ModelFormatVersion : uint
   Version1 = 1, // Initial version
   Version2 = 2, // saving material names
   Version3 = 3, // Bones, baby!
-  Version4 = 4  // Separate bone hierarchy.
 }
 
 enum PerVertexData : uint

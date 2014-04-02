@@ -45,8 +45,8 @@
   <Dversion>2</Dversion>
   <ignoreUnsupportedPragmas>0</ignoreUnsupportedPragmas>
   <compiler>0</compiler>
-  <otherDMD>0</otherDMD>
-  <program>$(DMDInstallDir)windows\bin\dmd.exe</program>
+  <otherDMD>1</otherDMD>
+  <program>$(DMDInstallDir)windows\bin-nostd\dmd.exe</program>
   <imppath>$(ProjectDir)\..\..\..\..\druntime\import;$(ProjectDir)\..\..\..\..\phobos;$(ProjectDir)\..\..\..\..\thBase\src</imppath>
   <fileImppath />
   <outdir>..\$(ConfigurationName)</outdir>
