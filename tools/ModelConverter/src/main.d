@@ -24,6 +24,7 @@ bool g_debug = false;
 bool g_log = false;
 RawFile g_logFile;
 bool g_includeMissingTextures = false;
+bool g_flipUVs = true;
 
 static ~this()
 {
@@ -126,13 +127,16 @@ void ProgressModel(string path)
 {
   try
   {
-    const(aiScene)* scene = Assimp.ImportFile(toCString(path), 
-                                              aiPostProcessSteps.CalcTangentSpace |
-                                              aiPostProcessSteps.Triangulate |
-                                              aiPostProcessSteps.JoinIdenticalVertices |
-                                              aiPostProcessSteps.FlipUVs);// |
-    //aiPostProcessSteps.MakeLeftHanded); // |
-    //aiPostProcessSteps.PreTransformVertices );
+    auto importOptions = aiPostProcessSteps.CalcTangentSpace
+                       | aiPostProcessSteps.Triangulate
+                       | aiPostProcessSteps.JoinIdenticalVertices;
+                     //| aiPostProcessSteps.MakeLeftHanded;
+                     //| aiPostProcessSteps.PreTransformVertices;
+    if(g_flipUVs)
+    {
+      importOptions |= aiPostProcessSteps.FlipUVs;
+    }
+    const(aiScene)* scene = Assimp.ImportFile(toCString(path), importOptions);
     if(scene is null){
       Error("Couldn't load model from file '%s'", path);
     }
@@ -746,6 +750,18 @@ int main(string[] args)
   auto models = scopedRef!(Stack!string)(defaultCtor);
   for(size_t i=1; i<args.length; i++)
   {
+    if(args[i] == "-h" || args[i] == "--help")
+    {
+      writefln("Available options:\n"
+               "  --workdir                  Sets the working dir.\n"
+               "  --debug \n"
+               "  --includeMissingTextures   Will not ignore referenced texture files that are not present on the disc.\n"
+               "  --noPause                  Does not pause at the end of the conversion process.\n"
+               "  --log                      Does some minimal logging to a file called 'ModelConverterD.log.'\n"
+               "  --noUVFlip                 Does NOT flip UV coordinates, which is usually required for D3D.\n");
+      return 42;
+    }
+
     if(args[i] == "--workdir")
     {
       if(i + 1 > args.length)
@@ -765,11 +781,15 @@ int main(string[] args)
     {
       g_includeMissingTextures = true;
     }
-    else if(args[i] == "--nopause")
+    else if(args[i] == "--noPause")
     {
       pauseBeforeExiting = false;
     }
     else if(args[i] == "--log")
+    {
+      g_log = true;
+    }
+    else if(args[i] == "--noUVFlip")
     {
       g_log = true;
     }
