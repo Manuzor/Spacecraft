@@ -222,7 +222,7 @@ void ProgressModel(string path)
 
     // Collect NodeInfos
     {
-      uint id = 1;
+      uint id = 0;
       void collectNodes(const(aiNode)* node)
       {
         auto name = node.mName.data[0..node.mName.length];
@@ -658,7 +658,7 @@ void ProgressModel(string path)
       }
     }
 
-    //Nodes
+    // Write Nodes
     {
       outFile.startWriteChunk("nodes");
       scope(exit) {
