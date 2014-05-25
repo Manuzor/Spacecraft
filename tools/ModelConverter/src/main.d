@@ -17,6 +17,7 @@ import thBase.asserthandler;
 import assimp.assimp;
 import modeltypes;
 import core.stdc.stdlib;
+import core.stdc.stdio;
 
 rcstring g_workDir;
 bool g_debug = false;
@@ -97,34 +98,25 @@ mat4 Convert(ref const(aiMatrix4x4) pData){
   return result;
 }
 
+struct NodeInfo
+{
+  uint id;
+  const(aiNode)* node;
+}
+
 struct BoneNode
 {
-  // For generating unique IDs
-  static ushort counter = 1;
+  __gshared ushort counter = 0;
 
-public:
-
-  // Hierarchy stuff
-  BoneNode* parent;
-  Vector!(BoneNode*) children;
-
-  // Actual bone data
   ushort id;
-  const(char)[] name;
+  NodeInfo node;
   mat4 offsetMatrix;
-  
-  this(const(aiBone)* bone)
+
+  this(const(aiBone)* bone, NodeInfo node)
   {
     id = counter++;
-    parent = null;
-    children = New!(Vector!(BoneNode*))();
-    name = bone.mName.data[0..bone.mName.length];
+    this.node = node;
     offsetMatrix = Convert(bone.mOffsetMatrix);
-  }
-
-  ~this()
-  {
-    Delete(children);
   }
 }
 
@@ -143,6 +135,8 @@ void ProgressModel(string path)
       Error("Couldn't load model from file '%s'", path);
     }
 
+    auto logFile = RawFile("logFile.txt", "w");
+
     scope(exit)
     {
       Assimp.ReleaseImport(cast(aiScene*)scene);
@@ -157,10 +151,10 @@ void ProgressModel(string path)
     outFile.startWriting("thModel", ModelFormatVersion.max);
     scope(exit) outFile.endWriting();
 
-    auto textureFiles = scopedRef!(Hashmap!(const(char)[], uint, StringHashPolicy))(NoArgs());
-    auto materialTextures = scopedRef!(Vector!MaterialTextureInfo)(NoArgs());
-    auto textures = scopedRef!(Vector!(const(char)[]))(NoArgs());
-    auto materialNames = scopedRef!(Vector!(const(char)[]))(NoArgs());
+    auto textureFiles = scopedRef!(Hashmap!(const(char)[], uint, StringHashPolicy))(defaultCtor);
+    auto materialTextures = scopedRef!(Vector!MaterialTextureInfo)(defaultCtor);
+    auto textures = scopedRef!(Vector!(const(char)[]))(defaultCtor);
+    auto materialNames = scopedRef!(Vector!(const(char)[]))(defaultCtor);
     uint numTextureReferences;
 
     // Collect Textures
@@ -224,6 +218,30 @@ void ProgressModel(string path)
       }
     }
 
+    auto uniqueNodes = composite!( Hashmap!(const(char)[], NodeInfo, StringHashPolicy) )(defaultCtor);
+
+    // Collect NodeInfos
+    {
+      uint id = 1;
+      void collectNodes(const(aiNode)* node)
+      {
+        auto name = node.mName.data[0..node.mName.length];
+        if(!uniqueNodes.exists(name))
+        {
+          fprintf(logFile.m_Handle, "  %.*s\n", name.length, name.ptr);
+          uniqueNodes[name] = NodeInfo(id++, node);
+        }
+        foreach(child ; node.mChildren[0..node.mNumChildren])
+        {
+          collectNodes(child);
+        }
+      }
+
+      fprintf(logFile.m_Handle, "Nodes:\n");
+      collectNodes(scene.mRootNode);
+      logFile.flush();
+    }
+
     auto uniqueBones = composite!( Hashmap!(const(char)[], BoneNode*, StringHashPolicy) )(defaultCtor);
     scope(exit){
       foreach(bone; uniqueBones.values)
@@ -233,6 +251,7 @@ void ProgressModel(string path)
     }
     // Collect unique bones
     {
+      fprintf(logFile.m_Handle, "Bones:\n");
       // Collect all unique bones from all meshes
       for(size_t i=0; i < scene.mNumMeshes; i++)
       {
@@ -243,50 +262,16 @@ void ProgressModel(string path)
           auto key = bone.mName.data[0..bone.mName.length];
           if(!uniqueBones.exists(key))
           {
-            uniqueBones[key] = New!(BoneNode)(bone);
+            fprintf(logFile.m_Handle, "  %.*s\n", key.length, key.ptr);
+            NodeInfo nodeInfo;
+            if(!uniqueNodes.tryGet(key, nodeInfo))
+            {
+              Error("The bone name '%s' was not found as a node!", key);
+            }
+            uniqueBones[key] = New!(BoneNode)(bone, nodeInfo);
           }
         }
       }
-    }
-
-    // Build bone hierarchy
-    {
-      // Define helper functions
-      void findBoneRoots(const(aiNode)* sceneNode, Vector!(const(aiNode)*) boneRoots)
-      {
-        auto nodeName = sceneNode.mName.data[0..sceneNode.mName.length];
-        if(uniqueBones.exists(nodeName))
-        {
-          boneRoots.push_back(sceneNode);
-          return;
-        }
-        foreach(childNode; sceneNode.mChildren[0..sceneNode.mNumChildren])
-        {
-          findBoneRoots(childNode, boneRoots);
-        }
-      }
-      void buildHierarchy(const(aiNode)* sceneNode, BoneNode* parent)
-      {
-        foreach(childNode; sceneNode.mChildren[0..sceneNode.mNumChildren])
-        {
-          auto boneName = childNode.mName.data[0..childNode.mName.length];
-          auto bone = uniqueBones[boneName];
-          bone.parent = parent;
-          parent.children.push_back(bone);
-          buildHierarchy(childNode, bone);
-        }
-      }
-
-      // Begin the actual processing
-      auto boneRoots = composite!(Vector!(const(aiNode)*))(defaultCtor);
-      findBoneRoots(scene.mRootNode, boneRoots);
-
-      foreach(boneRoot ; boneRoots)
-      {
-        auto boneName = boneRoot.mName.data[0..boneRoot.mName.length];
-        buildHierarchy(boneRoot, uniqueBones[boneName]);
-      }
-      
     }
 
     //Size information
@@ -308,18 +293,9 @@ void ProgressModel(string path)
       }
       outFile.write(materialNameMemory);
 
-      // calc boneNode memory
+      // write boneNode memory
       {
-        uint boneNameMemory = 0;
-        uint numChildren = 0;
-        foreach(bone; uniqueBones)
-        {
-          boneNameMemory += bone.name.length;
-          numChildren += bone.children.length;
-        }
-        outFile.write(boneNameMemory);
         outFile.write(int_cast!uint(uniqueBones.count));
-        outFile.write(numChildren);
       }
 
       // calc bone memory of meshes
@@ -460,12 +436,12 @@ void ProgressModel(string path)
       }
     }
 
-    // Bone hierarchy
+    // write bones
     {
       outFile.startWriteChunk("bones");
       scope(exit){
         size_t size = outFile.endWriteChunk();
-        writefln("bones (hierarchy) %d kb (%d bytes)", size/1024, size);
+        writefln("bones %d kb (%d bytes)", size/1024, size);
       }
 
       outFile.write(uniqueBones.count);
@@ -473,16 +449,10 @@ void ProgressModel(string path)
       {
         foreach(bone; uniqueBones)
         {
-          if(bone.id == i + 1) // id of 0 is an invalid id
+          if(bone.id == i)
           {
-            outFile.writeArray(bone.name);
             outFile.write(bone.offsetMatrix);
-            outFile.write(int_cast!ushort(bone.parent is null ? 0 : bone.parent.id));
-            outFile.write(int_cast!uint(bone.children.length));
-            foreach(child; bone.children)
-            {
-              outFile.write(child.id);
-            }
+            outFile.write(bone.node.id);
           }
         }
       }
@@ -696,7 +666,7 @@ void ProgressModel(string path)
         writefln("nodes %d kb",size/1024);
       }
 
-      auto nodeLookup = scopedRef!(Hashmap!(void*, uint))(NoArgs());
+      auto nodeLookup = scopedRef!(Hashmap!(void*, uint))(defaultCtor);
       uint nextNodeId = 0;
 
       uint countNodes(const(aiNode*) node)
@@ -765,7 +735,7 @@ int main(string[] args)
 
   thBase.asserthandler.Init();
   Assimp.Load("assimp.dll","");
-  auto models = scopedRef!(Stack!string)(NoArgs());
+  auto models = scopedRef!(Stack!string)(defaultCtor);
   for(size_t i=1; i<args.length; i++)
   {
     if(args[i] == "--workdir")
