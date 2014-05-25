@@ -37,6 +37,18 @@ struct MaterialTextureInfo
   TextureType semantic;
 }
 
+void showHelp()
+{
+  writefln("Converts model files to the thModel format using Assimp 3."
+           "Available options:\n"
+           "  --workdir                  Sets the working dir.\n"
+           "  --debug \n"
+           "  --includeMissingTextures   Will not ignore referenced texture files that are not present on the disc.\n"
+           "  --noPause                  Does not pause at the end of the conversion process.\n"
+           "  --log                      Does some minimal logging to a file called 'ModelConverterD.log'.\n"
+           "  --noUVFlip                 Does NOT flip UV coordinates, which is usually required for D3D.\n");
+}
+
 void Warning(string fmt, ...)
 {
   StdOutPutPolicy put;
@@ -752,13 +764,7 @@ int main(string[] args)
   {
     if(args[i] == "-h" || args[i] == "--help")
     {
-      writefln("Available options:\n"
-               "  --workdir                  Sets the working dir.\n"
-               "  --debug \n"
-               "  --includeMissingTextures   Will not ignore referenced texture files that are not present on the disc.\n"
-               "  --noPause                  Does not pause at the end of the conversion process.\n"
-               "  --log                      Does some minimal logging to a file called 'ModelConverterD.log.'\n"
-               "  --noUVFlip                 Does NOT flip UV coordinates, which is usually required for D3D.\n");
+      showHelp();
       return 42;
     }
 
