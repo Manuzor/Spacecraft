@@ -21,6 +21,8 @@ import core.stdc.stdio;
 
 rcstring g_workDir;
 bool g_debug = false;
+bool g_log = false;
+RawFile g_logFile;
 bool g_includeMissingTextures = false;
 
 static ~this()
@@ -135,10 +137,17 @@ void ProgressModel(string path)
       Error("Couldn't load model from file '%s'", path);
     }
 
-    auto logFile = RawFile("logFile.txt", "w");
+    if(g_log)
+      g_logFile.open("ModelConverterD.log", "w");
 
     scope(exit)
     {
+      if(g_log)
+      {
+        g_logFile.flush();
+        g_logFile.close();
+      }
+
       Assimp.ReleaseImport(cast(aiScene*)scene);
       scene = null;
     }
@@ -228,7 +237,7 @@ void ProgressModel(string path)
         auto name = node.mName.data[0..node.mName.length];
         if(!uniqueNodes.exists(name))
         {
-          fprintf(logFile.m_Handle, "  %.*s\n", name.length, name.ptr);
+          if(g_log) fprintf(g_logFile.m_Handle, "  %.*s\n", name.length, name.ptr);
           uniqueNodes[name] = NodeInfo(id++, node);
         }
         foreach(child ; node.mChildren[0..node.mNumChildren])
@@ -236,10 +245,9 @@ void ProgressModel(string path)
           collectNodes(child);
         }
       }
-
-      fprintf(logFile.m_Handle, "Nodes:\n");
+      if(g_log) fprintf(g_logFile.m_Handle, "Nodes:\n");
       collectNodes(scene.mRootNode);
-      logFile.flush();
+      if(g_log) g_logFile.flush();
     }
 
     auto uniqueBones = composite!( Hashmap!(const(char)[], BoneNode*, StringHashPolicy) )(defaultCtor);
@@ -251,7 +259,7 @@ void ProgressModel(string path)
     }
     // Collect unique bones
     {
-      fprintf(logFile.m_Handle, "Bones:\n");
+      if(g_log) fprintf(g_logFile.m_Handle, "Bones:\n");
       // Collect all unique bones from all meshes
       for(size_t i=0; i < scene.mNumMeshes; i++)
       {
@@ -262,7 +270,7 @@ void ProgressModel(string path)
           auto key = bone.mName.data[0..bone.mName.length];
           if(!uniqueBones.exists(key))
           {
-            fprintf(logFile.m_Handle, "  %.*s\n", key.length, key.ptr);
+            if(g_log) fprintf(g_logFile.m_Handle, "  %.*s\n", key.length, key.ptr);
             NodeInfo nodeInfo;
             if(!uniqueNodes.tryGet(key, nodeInfo))
             {
@@ -761,19 +769,24 @@ int main(string[] args)
     {
       pauseBeforeExiting = false;
     }
-    else if(args[i].endsWith(".dae", CaseSensitive.no))
+    else if(args[i] == "--log")
     {
-      if(thBase.file.exists(args[i]))
-        models.push(args[i]);
-      else
-      {
-        writefln("File: %s does not exist", args[i]);
-      }
+      g_log = true;
+    }
+    else if(thBase.file.exists(args[i]))
+    {
+      models.push(args[i]);
     }
     else
     {
-      writefln("Error: Unkown command line option %s", args[i]);
-      return 2;
+      if(args[i].startsWith("--"))
+      {
+        writefln("Error: Unkown command line option %s.", args[i]);
+        return 2;
+      }
+
+      writefln("Error: File does not exist: %s.", args[i]);
+      return 3;
     }
   }
 
