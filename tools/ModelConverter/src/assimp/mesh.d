@@ -143,7 +143,7 @@ extern ( C ) {
     *    least 4. For the moment it is absolutely safe to assume that this will
     *    not change.
     */
-   const uint AI_MAX_NUMBER_OF_COLOR_SETS = 0x4;
+   const uint AI_MAX_NUMBER_OF_COLOR_SETS = 0x8;
 
    /**
     * Maximum number of texture coord sets (UV(W) channels) per mesh
@@ -155,7 +155,7 @@ extern ( C ) {
     *    least 4. For the moment it is absolutely safe to assume that this will
     *    not change.
     */
-   const uint AI_MAX_NUMBER_OF_TEXTURECOORDS = 0x4;
+   const uint AI_MAX_NUMBER_OF_TEXTURECOORDS = 0x8;
 
    /**
     * Enumerates the types of geometric primitives supported by Assimp.
@@ -363,5 +363,11 @@ extern ( C ) {
        * index into the scene's material list.
        */
       uint mMaterialIndex;
+
+      aiString mName;
+
+      uint mNumAnimMeshes;
+
+      void** mAnimMeshes;
    }
 }
